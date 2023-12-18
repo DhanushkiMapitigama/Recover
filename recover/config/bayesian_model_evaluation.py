@@ -1,6 +1,6 @@
 from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
 from recover.models.models import Baseline
-from recover.models.predictors import BilinearFilmMLPPredictor, BayesianBilinearMLPPredictor
+from recover.models.predictors import BilinearFilmMLPPredictor, BilinearMLPPredictor, MLPPredictor
 from recover.utils.utils import get_project_root
 from recover.train import train_epoch, bayesian_train_epoch, eval_epoch, bayesian_eval_epoch, BasicTrainer, BayesianBasicTrainer
 import os
@@ -15,7 +15,7 @@ from importlib import import_module
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([2, 3, 42]),
+    "seed": tune.grid_search([1, 2, 3, 42]),
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
@@ -26,7 +26,11 @@ pipeline_config = {
 }
 
 predictor_config = {
-    "predictor": BayesianBilinearMLPPredictor,
+    "predictor": BilinearMLPPredictor,
+    "bayesian_predictor": True,
+    "bayesian_before_merge": False, # For bayesian predictor implementation - Layers after merge are bayesian by default
+    "sigmoid": False,
+    "num_realizations": 10, # For bayesian uncertainty
     "predictor_layers":
         [
             2048,
@@ -56,7 +60,10 @@ dataset_config = {
     "cell_line": 'MCF7',  # 'PC-3',
     "target": "bliss_max",  # tune.grid_search(["css", "bliss", "zip", "loewe", "hsa"]),
     "fp_bits": 1024,
-    "fp_radius": 2
+    "fp_radius": 2,
+    "add_noise": True,
+    "noise_type": 'salt_pepper', # 'gaussian', 'salt_pepper', 'random'
+    "noise_prop": 0.1,
 }
 
 ########################################################################################################################
