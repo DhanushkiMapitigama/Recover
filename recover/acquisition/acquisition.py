@@ -15,6 +15,8 @@ class AbstractAcquisition:
     """
 
     def __init__(self, config):
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = torch.device(device_type)
         pass
 
     def get_scores(self, output):
@@ -50,9 +52,10 @@ class ExpectedImprovementAcquisition(AbstractAcquisition):
         epsilon = 1e-6
         
         z = (mean-best-epsilon)/(std+epsilon)
+        z = z.cpu()
         phi = np.exp(-0.5*(z**2))/np.sqrt(2*np.pi)
         Phi = 0.5*(1+erf(z/np.sqrt(2)))
-        scores = (mean-best)*Phi+std*phi
+        scores = (mean.cpu()-best.cpu())*Phi+std.cpu()*phi
 
         return scores.to("cpu")
 
@@ -65,7 +68,7 @@ class RandomAcquisition(AbstractAcquisition):
         return torch.randn(output.shape[0])
         
 
-class ProbabilityOfImprovementAcquisition(AbstractAcquisition):
+class PI(AbstractAcquisition):
     """
     Probability of Improvement Aquisition Function
     
@@ -78,6 +81,7 @@ class ProbabilityOfImprovementAcquisition(AbstractAcquisition):
         current_best = self.get_current_best(output)
         
         z = (mean - current_best) / std
+        z = z.cpu()
         prob_of_improvement_scores = norm.cdf(z)
 
         return torch.tensor(prob_of_improvement_scores).to("cpu")
