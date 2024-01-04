@@ -1,4 +1,4 @@
-from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
+from recover.datasets.drugcomb_matrix_data import DrugCombMatrix, DrugCombMatrixDrugLevelSplitTrain
 from recover.models.models import Baseline
 from recover.models.predictors import BilinearFilmMLPPredictor, BilinearMLPPredictor, MLPPredictor
 from recover.utils.utils import get_project_root
@@ -15,7 +15,7 @@ from importlib import import_module
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([1, 2, 3, 42]),
+    "seed": tune.grid_search([2, 3, 4]),
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
@@ -49,19 +49,19 @@ model_config = {
 }
 
 dataset_config = {
-    "dataset": DrugCombMatrix,
+    "dataset": DrugCombMatrixDrugLevelSplitTrain,
     "study_name": 'ALMANAC',
     "in_house_data": 'without',
     "rounds_to_include": [],
     "val_set_prop": 0.2,
-    "test_set_prop": 0.1,
+    "test_set_prop": 0.,
     "test_on_unseen_cell_line": False,
     "split_valid_train": "pair_level",
     "cell_line": 'MCF7',  # 'PC-3',
     "target": "bliss_max",  # tune.grid_search(["css", "bliss", "zip", "loewe", "hsa"]),
     "fp_bits": 1024,
     "fp_radius": 2,
-    "add_noise": True,
+    "add_noise": False,
     "noise_type": 'salt_pepper', # 'gaussian', 'salt_pepper', 'random'
     "noise_prop": 0.1,
 }

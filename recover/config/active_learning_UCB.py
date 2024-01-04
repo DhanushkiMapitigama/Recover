@@ -3,7 +3,7 @@ from recover.models.models import Baseline, EnsembleModel
 from recover.models.predictors import BilinearFilmMLPPredictor, \
     BilinearMLPPredictor, BilinearFilmWithFeatMLPPredictor
 from recover.utils.utils import get_project_root
-from recover.acquisition.acquisition import RandomAcquisition, GreedyAcquisition, UCB, ProbabilityOfImprovementAcquisition, ExpectedImprovementAcquisition
+from recover.acquisition.acquisition import RandomAcquisition, GreedyAcquisition, UCB, PI, ExpectedImprovementAcquisition
 from recover.train import train_epoch, eval_epoch, BasicTrainer, ActiveTrainer
 import os
 from ray import tune
@@ -16,7 +16,7 @@ from ray import tune
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([1]),
+    "seed": tune.grid_search([2]),
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
@@ -31,7 +31,7 @@ predictor_config = {
     "bayesian_predictor": False,
     "bayesian_before_merge": False, # For bayesian predictor implementation - Layers after merge are bayesian by default
     "sigmoid": False,
-    "num_realizations": 0, # For bayesian uncertainty
+    "num_realizations": 5, # For bayesian uncertainty
     "predictor_layers":
         [
             2048,
@@ -78,7 +78,7 @@ dataset_config = {
 
 active_learning_config = {
     "ensemble_size": 5,
-    "acquisition": tune.grid_search([GreedyAcquisition, UCB, RandomAcquisition]),
+    "acquisition": tune.grid_search([ PI, ExpectedImprovementAcquisition ]),
     "patience_max": 4,
     "kappa": 1,
     "kappa_decrease_factor": 1,
@@ -106,8 +106,8 @@ configuration = {
     "checkpoint_score_attr": 'eval/comb_r_squared',
     "keep_checkpoints_num": 1,
     "checkpoint_at_end": False,
-    "checkpoint_freq": 1,
-    "resources_per_trial": {"cpu": 16, "gpu": 0},
+    "checkpoint_freq": 0,
+    "resources_per_trial": {"cpu": 16, "gpu": 1},
     "scheduler": None,
     "search_alg": None,
 }

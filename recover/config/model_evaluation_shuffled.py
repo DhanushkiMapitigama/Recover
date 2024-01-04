@@ -27,6 +27,10 @@ pipeline_config = {
 
 predictor_config = {
     "predictor": ShuffledBilinearMLPPredictor,
+    "bayesian_predictor": False,
+    "bayesian_before_merge": False, # For bayesian predictor implementation - Layers after merge are bayesian by default
+    "sigmoid": False,
+    "num_realizations": 5, # For bayesian uncertainty
     "predictor_layers":
         [
             2048,
@@ -36,6 +40,7 @@ predictor_config = {
         ],
     "merge_n_layers_before_the_end": 2,  # Computation on the sum of the two drug embeddings for the last n layers
     "allow_neg_eigval": True,
+    "stop": {"training_iteration": 1000, 'patience': 10}
 }
 
 model_config = {
@@ -55,7 +60,10 @@ dataset_config = {
     "cell_line": 'MCF7',  # 'PC-3',
     "target": "bliss_max",  # tune.grid_search(["css", "bliss", "zip", "loewe", "hsa"]),
     "fp_bits": 1024,
-    "fp_radius": 2
+    "fp_radius": 2,
+    "add_noise": False,
+    "noise_type": 'salt_pepper', # 'gaussian', 'salt_pepper', 'random'
+    "noise_prop": 0.1,
 }
 
 ########################################################################################################################

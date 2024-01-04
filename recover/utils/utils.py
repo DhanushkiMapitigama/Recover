@@ -44,7 +44,7 @@ Function to get the dataset with the permutation of the combination
 def get_tensor_dataset_swapped_combination(data, idxs):
 
     combinations = data.ddi_edge_idx[:, idxs].T
-    reversed_tensor = torch.tensor(np.array([list(reversed(inner_list)) for inner_list in combinations]))
+    reversed_tensor = torch.tensor(np.array([list(reversed(inner_list.cpu())) for inner_list in combinations]))
 
     return TensorDataset(
         reversed_tensor,

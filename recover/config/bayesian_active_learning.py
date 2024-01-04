@@ -31,7 +31,7 @@ predictor_config = {
     "bayesian_predictor": True,
     "bayesian_before_merge": False, # For bayesian predictor implementation - Layers after merge are bayesian by default
     "sigmoid": False,
-    "num_realizations": 10, # For bayesian uncertainty
+    "num_realizations": 5, # For bayesian uncertainty
     "predictor_layers":
         [
             2048,
@@ -80,7 +80,7 @@ dataset_config = {
 }
 
 active_learning_config = {
-    "ensemble_size": 10,
+    "ensemble_size": 5,
     "acquisition": tune.grid_search([ProbabilityOfImprovementAcquisition, UCB, ExpectedImprovementAcquisition]),
     "patience_max": 4,
     "kappa": 1,
@@ -110,7 +110,7 @@ configuration = {
     "keep_checkpoints_num": 1,
     "checkpoint_at_end": False,
     "checkpoint_freq": 1,
-    "resources_per_trial": {"cpu": 16, "gpu": 0},
+    "resources_per_trial": {"cpu": 16, "gpu": 1},
     "scheduler": None,
     "search_alg": None,
 }

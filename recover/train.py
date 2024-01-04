@@ -339,7 +339,7 @@ class BayesianBasicTrainer(tune.Trainable):
     def setup(self, config):
         print("Initializing regular training pipeline")
         
-        self.test_invariance = True 
+        self.test_invariance = False 
 
         self.batch_size = config["batch_size"]
         self.num_realizations = config["num_realizations"]
@@ -414,6 +414,7 @@ class BayesianBasicTrainer(tune.Trainable):
         )
         
         """
+        
         # Test loader
         test_ddi_dataset = get_tensor_dataset(self.data, self.test_idxs)
 
@@ -421,10 +422,10 @@ class BayesianBasicTrainer(tune.Trainable):
             test_ddi_dataset,
             batch_size=config["batch_size"]
         )
-        """
         
-        # for unseen test - DrugCombMatrixDrugLevelSplitTest
-        # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest
+        """
+        # for unseen test - DrugCombMatrixDrugLevelSplitTest - ONLY WORKS ON CPU
+        # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest - ONLY WORKS ON CPU
         
         
         dl_split_data = DrugCombMatrixDrugLevelSplitTest(cell_line='MCF7',
@@ -436,7 +437,7 @@ class BayesianBasicTrainer(tune.Trainable):
         test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
         self.test_loader = DataLoader(test_dataset, batch_size=128)
         
-
+        
         # Initialize model
         self.model = config["model"](self.data, config)
 
@@ -521,8 +522,8 @@ class BayesianBasicTrainer(tune.Trainable):
                 final_eval_result[str(key)+ "/std"] = np.std(final_eval_metrics[key])
                 
             
-            synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
-            synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
+            #synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
+            #synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
             
             """
             # Uncomment this to get the synergy prediction performance when working with multi-cell lines 
@@ -538,6 +539,7 @@ class BayesianBasicTrainer(tune.Trainable):
             
             print("Test performance")
             test_result = {}
+            print(result_synergy)
             
         
             
@@ -556,8 +558,8 @@ class BayesianBasicTrainer(tune.Trainable):
                 test_result[str(key)+ "/std"] = np.std(test_metrics[key])
                 
             
-            synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
-            synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
+            #synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
+            #synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
 
             
             """
@@ -571,9 +573,9 @@ class BayesianBasicTrainer(tune.Trainable):
             
             metrics.update(dict(test_result))
             
-            metrics['synergy_combs'] = list(drug_combs)
-            metrics['synergy_mean'] = list(synergy_mean)
-            metrics['synergy_std'] = list(synergy_std)
+            #metrics['synergy_combs'] = list(drug_combs)
+            #metrics['synergy_mean'] = list(synergy_mean)
+            #metrics['synergy_std'] = list(synergy_std)
             
             """
             # Start the test on permuted unseen dataset - To confirm the invariance

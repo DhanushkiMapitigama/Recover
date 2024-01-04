@@ -1,8 +1,8 @@
 from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
 from recover.models.models import Baseline
-from recover.models.predictors import BilinearFilmMLPPredictor, BilinearLinFilmWithFeatMLPPredictor
+from recover.models.predictors import BilinearFilmMLPPredictor, BilinearLinFilmWithFeatMLPPredictor, BilinearFilmWithFeatMLPPredictor
 from recover.utils.utils import get_project_root
-from recover.train import train_epoch, eval_epoch, BasicTrainer
+from recover.train import train_epoch, bayesian_train_epoch, eval_epoch, bayesian_eval_epoch, BasicTrainer, BayesianBasicTrainer
 import os
 from ray import tune
 from importlib import import_module
@@ -15,21 +15,22 @@ from importlib import import_module
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([2, 3, 4]),
+    "seed": tune.grid_search([2]),
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
     "batch_size": 128,
     # Train epoch and eval_epoch to use
-    "train_epoch": train_epoch,
-    "eval_epoch": eval_epoch,
+    "train_epoch": bayesian_train_epoch,
+    "eval_epoch": bayesian_eval_epoch,
 }
 
 predictor_config = {
     "predictor": BilinearLinFilmWithFeatMLPPredictor,
-    "bayesian_predictor": False,
+    "bayesian_predictor": True,
     "bayesian_before_merge": False, # For bayesian predictor implementation - Layers after merge are bayesian by default
-    "num_realizations": 0, # For bayesian uncertainty
+    "num_realizations": 10, # For bayesian uncertainty
+    "sigmoid": False,
     "predictor_layers":
         [
             2048,
@@ -39,6 +40,7 @@ predictor_config = {
         ],
     "merge_n_layers_before_the_end": 2,  # Computation on the sum of the two drug embeddings for the last n layers
     "allow_neg_eigval": True,
+    "stop": {"training_iteration": 1000, 'patience': 10}
 }
 
 model_config = {
@@ -59,7 +61,10 @@ dataset_config = {
     "cell_line": None,  # 'PC-3',
     "target": "bliss_max",  # tune.grid_search(["css", "bliss", "zip", "loewe", "hsa"]),
     "fp_bits": 1024,
-    "fp_radius": 2
+    "fp_radius": 2,
+    "add_noise": False,
+    "noise_type": 'salt_pepper', # 'gaussian', 'salt_pepper', 'random'
+    "noise_prop": 0.1,
 }
 
 ########################################################################################################################
@@ -67,7 +72,7 @@ dataset_config = {
 ########################################################################################################################
 
 configuration = {
-    "trainer": BasicTrainer,  # PUT NUM GPU BACK TO 1
+    "trainer": BayesianBasicTrainer,  # PUT NUM GPU BACK TO 1
     "trainer_config": {
         **pipeline_config,
         **predictor_config,
@@ -80,8 +85,8 @@ configuration = {
     "checkpoint_score_attr": 'eval/comb_r_squared',
     "keep_checkpoints_num": 1,
     "checkpoint_at_end": False,
-    "checkpoint_freq": 1,
-    "resources_per_trial": {"cpu": 8, "gpu": 0},
+    "checkpoint_freq": 0,
+    "resources_per_trial": {"cpu": 16, "gpu": 2},
     "scheduler": None,
     "search_alg": None,
 }
