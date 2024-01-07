@@ -119,6 +119,7 @@ def eval_epoch(data, loader, model):
     all_out = []
     all_mean_preds = []
     all_targets = []
+    all_combs = []
 
     with torch.no_grad():
         for _, drug_drug_batch in enumerate(loader):
@@ -128,6 +129,7 @@ def eval_epoch(data, loader, model):
             all_out.append(out)
             all_mean_preds.extend(out.mean(dim=1).tolist())
             all_targets.extend(drug_drug_batch[2].tolist())
+            all_combs.extend(drug_drug_batch[0].tolist())
 
             loss = model.loss(out, drug_drug_batch)
             epoch_loss += loss.item()
@@ -145,7 +147,7 @@ def eval_epoch(data, loader, model):
 
     all_out = torch.cat(all_out)
 
-    return summary_dict, all_out
+    return summary_dict, all_out, all_combs
 
 
 """
@@ -228,6 +230,9 @@ class BasicTrainer(tune.Trainable):
             in_house_data=config["in_house_data"],
             rounds_to_include=config["rounds_to_include"],
         )
+        
+        self.patience_stop = config["stop"]["patience"]
+        self.max_iter = config["stop"]["training_iteration"]
 
         self.data = dataset.data.to(self.device)
 
@@ -261,6 +266,31 @@ class BasicTrainer(tune.Trainable):
             valid_ddi_dataset,
             batch_size=config["batch_size"]
         )
+        
+        
+        
+        # Test loader
+        test_ddi_dataset = get_tensor_dataset(self.data, self.test_idxs)
+
+        self.test_loader = DataLoader(
+            test_ddi_dataset,
+            batch_size=config["batch_size"]
+        )
+        
+        """
+        # for unseen test - DrugCombMatrixDrugLevelSplitTest - ONLY WORKS ON CPU
+        # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest - ONLY WORKS ON CPU
+        
+        
+        dl_split_data = DrugCombMatrixOneHiddenDrugSplitTest(cell_line='MCF7',
+                                         fp_bits=1024,
+                                         fp_radius=2)
+        
+        dl_split_data.data.ddi_edge_response = dl_split_data.data.ddi_edge_bliss_max
+        self.test_idxs = range(len(dl_split_data.data.ddi_edge_response))
+        test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
+        self.test_loader = DataLoader(test_dataset, batch_size=128)
+        """
 
         # Initialize model
         self.model = config["model"](self.data, config)
@@ -300,7 +330,7 @@ class BasicTrainer(tune.Trainable):
             self.optim,
         )
 
-        eval_metrics, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
+        eval_metrics, _, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
 
         train_metrics = [("train/" + k, v) for k, v in train_metrics.items()]
         eval_metrics = [("eval/" + k, v) for k, v in eval_metrics.items()]
@@ -318,7 +348,88 @@ class BasicTrainer(tune.Trainable):
 
         metrics['patience'] = self.patience
         metrics['all_space_explored'] = 0
+        num_realizations  = 1
 
+        
+        if ((self.patience >= self.patience_stop) | (self.training_it > self.max_iter)):
+        
+            print("Final eval performance")
+            final_eval_result = {}
+            
+            realization_results, result_synergy, drug_combs = self.eval_epoch(self.data, self.valid_loader, self.model)
+            final_eval_metrics = dict([("final_eval/" + k, [v]) for k, v in realization_results.items()])
+            
+            for i in range(num_realizations-1):
+                realization_results, new_synergy, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
+                result_synergy = torch.cat((result_synergy, new_synergy), dim=1)
+                for k, v in realization_results.items():
+                    final_eval_metrics["final_eval/" + k].append(v)
+                    
+            for key in final_eval_metrics:
+                final_eval_result[str(key)+ "/mean"] = np.mean(final_eval_metrics[key])
+                final_eval_result[str(key)+ "/std"] = np.std(final_eval_metrics[key])
+                
+            
+            #synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
+            #synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
+            
+            """
+            # Uncomment this to get the synergy prediction performance when working with multi-cell lines 
+            # Aggregate result for duplicate sets regardless of cell-line
+            result_tuples = list(map(lambda inner_list: tuple(sorted(inner_list)), drug_combs))
+            dataset = pd.DataFrame({'combination': result_tuples, 'mean': synergy_mean, 'std': synergy_std }, columns=['combination', 'mean', 'std'])
+            result_df = dataset.groupby('combination').apply(custom_agg) # Do custom aggregration  - Not needed when working on one cell-line but no difference in results
+            result_df.reset_index(drop=True, inplace=True)
+            """
+            
+            metrics.update(dict(final_eval_result))
+            
+            
+            print("Test performance")
+            test_result = {}
+            print(result_synergy)
+            
+        
+            
+            realization_results, result_synergy, drug_combs = self.eval_epoch(self.data, self.test_loader, self.model)
+            drug_combinations_synergy = {'data': self.test_idxs}
+            test_metrics = dict([("test/" + k, [v]) for k, v in realization_results.items()])
+            
+            for i in range(num_realizations-1):
+                realization_results, new_synergy, _ = self.eval_epoch(self.data, self.test_loader, self.model)
+                result_synergy = torch.cat((result_synergy, new_synergy), dim=1)
+                for k, v in realization_results.items():
+                    test_metrics["test/" + k].append(v)
+                    
+            for key in test_metrics:
+                test_result[str(key)+ "/mean"] = np.mean(test_metrics[key])
+                test_result[str(key)+ "/std"] = np.std(test_metrics[key])
+                
+            
+            synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
+            synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
+
+            
+            """
+            # Uncomment this to get the synergy prediction performance when working with multi-cell lines 
+            # Aggregate result for duplicate sets regardless of cell-line
+            result_tuples = list(map(lambda inner_list: tuple(sorted(inner_list)), drug_combs))
+            dataset = pd.DataFrame({'combination': result_tuples, 'mean': synergy_mean, 'std': synergy_std }, columns=['combination', 'mean', 'std'])
+            result_df = dataset.groupby('combination').apply(custom_agg) # Do custom aggregration  - Not needed when working on one cell-line but no difference in results
+            result_df.reset_index(drop=True, inplace=True)
+            """
+            
+            metrics.update(dict(test_result))
+            
+            metrics['synergy_combs'] = list(drug_combs)
+            metrics['synergy_mean'] = list(synergy_mean)
+            metrics['synergy_std'] = list(synergy_std)
+            
+            """
+            # Start the test on permuted unseen dataset - To confirm the invariance
+            # Change the test_invariance boolean in Trainer setup to enable/disable this part of the code
+            """
+            
         return metrics
 
     def save_checkpoint(self, checkpoint_dir):
@@ -413,7 +524,7 @@ class BayesianBasicTrainer(tune.Trainable):
             batch_size=config["batch_size"]
         )
         
-        """
+        
         
         # Test loader
         test_ddi_dataset = get_tensor_dataset(self.data, self.test_idxs)
@@ -428,7 +539,7 @@ class BayesianBasicTrainer(tune.Trainable):
         # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest - ONLY WORKS ON CPU
         
         
-        dl_split_data = DrugCombMatrixDrugLevelSplitTest(cell_line='MCF7',
+        dl_split_data = DrugCombMatrixOneHiddenDrugSplitTest(cell_line='MCF7',
                                          fp_bits=1024,
                                          fp_radius=2)
         
@@ -437,6 +548,7 @@ class BayesianBasicTrainer(tune.Trainable):
         test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
         self.test_loader = DataLoader(test_dataset, batch_size=128)
         
+        """
         
         # Initialize model
         self.model = config["model"](self.data, config)
@@ -558,8 +670,8 @@ class BayesianBasicTrainer(tune.Trainable):
                 test_result[str(key)+ "/std"] = np.std(test_metrics[key])
                 
             
-            #synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
-            #synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
+            synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
+            synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
 
             
             """
@@ -573,9 +685,9 @@ class BayesianBasicTrainer(tune.Trainable):
             
             metrics.update(dict(test_result))
             
-            #metrics['synergy_combs'] = list(drug_combs)
-            #metrics['synergy_mean'] = list(synergy_mean)
-            #metrics['synergy_std'] = list(synergy_std)
+            metrics['synergy_combs'] = list(drug_combs)
+            metrics['synergy_mean'] = list(synergy_mean)
+            metrics['synergy_std'] = list(synergy_std)
             
             """
             # Start the test on permuted unseen dataset - To confirm the invariance
