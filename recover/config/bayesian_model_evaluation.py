@@ -1,4 +1,4 @@
-from recover.datasets.drugcomb_matrix_data import DrugCombMatrix, DrugCombMatrixDrugLevelSplitTrain
+from recover.datasets.drugcomb_matrix_data import DrugCombMatrix, DrugCombMatrixDrugLevelSplitTrain, DrugCombMatrixOneHiddenDrugSplitTrain
 from recover.models.models import Baseline
 from recover.models.predictors import BilinearFilmMLPPredictor, BilinearMLPPredictor, MLPPredictor
 from recover.utils.utils import get_project_root
@@ -15,7 +15,7 @@ from importlib import import_module
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([2, 3, 4]),
+    "seed": tune.grid_search([2]),
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
@@ -30,7 +30,7 @@ predictor_config = {
     "bayesian_predictor": True,
     "bayesian_before_merge": False, # For bayesian predictor implementation - Layers after merge are bayesian by default
     "sigmoid": False,
-    "num_realizations": 10, # For bayesian uncertainty
+    "num_realizations": 5, # For bayesian uncertainty
     "predictor_layers":
         [
             2048,
@@ -40,7 +40,7 @@ predictor_config = {
         ],
     "merge_n_layers_before_the_end": 2,  # Computation on the sum of the two drug embeddings for the last n layers
     "allow_neg_eigval": True,
-    "stop": {"training_iteration": 1000, 'patience': 10}
+    "stop": {"training_iteration": 1000, 'patience': 4}
 }
 
 model_config = {
@@ -49,12 +49,12 @@ model_config = {
 }
 
 dataset_config = {
-    "dataset": DrugCombMatrixDrugLevelSplitTrain,
+    "dataset":  DrugCombMatrix,
     "study_name": 'ALMANAC',
     "in_house_data": 'without',
     "rounds_to_include": [],
     "val_set_prop": 0.2,
-    "test_set_prop": 0.,
+    "test_set_prop": 0.2,
     "test_on_unseen_cell_line": False,
     "split_valid_train": "pair_level",
     "cell_line": 'MCF7',  # 'PC-3',
@@ -80,7 +80,7 @@ configuration = {
     },
     "summaries_dir": os.path.join(get_project_root(), "RayLogs"),
     "memory": 1800,
-    "stop": {"training_iteration": 1000, 'patience': 10},
+    "stop": {"training_iteration": 1000, 'patience': 4},
     "checkpoint_score_attr": 'eval/comb_r_squared',
     "keep_checkpoints_num": 1,
     "checkpoint_at_end": True,

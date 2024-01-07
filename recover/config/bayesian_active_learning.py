@@ -16,7 +16,7 @@ from ray import tune
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([1, 2, 3]),
+    "seed": tune.grid_search([ 2, 3, 4]),
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
@@ -110,7 +110,7 @@ configuration = {
     "keep_checkpoints_num": 1,
     "checkpoint_at_end": False,
     "checkpoint_freq": 1,
-    "resources_per_trial": {"cpu": 16, "gpu": 1},
+    "resources_per_trial": {"cpu": 16, "gpu": 0},
     "scheduler": None,
     "search_alg": None,
 }
