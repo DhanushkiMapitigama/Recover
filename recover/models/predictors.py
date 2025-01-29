@@ -19,7 +19,7 @@ class LinearModule(nn.Linear):
 
 
 class BayesianLinearModule(bnn.BayesLinear):
-    def __init__(self, in_features, out_features, prior_mu=0, prior_sigma=0.01):
+    def __init__(self, in_features, out_features, prior_mu=0, prior_sigma=0.05):
         super(BayesianLinearModule, self).__init__(prior_mu=prior_mu, prior_sigma=prior_sigma, in_features=in_features, out_features=out_features)
 
     def forward(self, input):

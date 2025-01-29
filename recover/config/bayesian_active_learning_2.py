@@ -18,7 +18,7 @@ pipeline_config = {
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
     "seed": tune.grid_search([42]),
     # Optimizer config
-    "lr": 1e-3,
+    "lr": 1e-2,
     "weight_decay": 1e-2,
     "batch_size": 128,
     # Train epoch and eval_epoch to use
@@ -67,7 +67,7 @@ dataset_config = {
     "in_house_data": 'without',
     "rounds_to_include": [],
     "cell_line": 'MCF7',  # Restrict to a specific cell line
-    "val_set_prop": 0.2,
+    "val_set_prop": 0.1,
     "test_set_prop": 0.,
     "test_on_unseen_cell_line": False,
     "split_valid_train": "pair_level",  # either "cell_line_level" or "pair_level"
@@ -80,14 +80,14 @@ dataset_config = {
 }
 
 active_learning_config = {
-    "ensemble_size": 10,
-    "acquisition": tune.grid_search([UCB, ProbabilityOfImprovementAcquisition, ExpectedImprovementAcquisition]),
+    "ensemble_size": 1,
+    "acquisition": tune.grid_search([ProbabilityOfImprovementAcquisition, UCB, ExpectedImprovementAcquisition]),
     "patience_max": 4,
     "kappa": 1,
     "kappa_decrease_factor": 1,
     "n_epoch_between_queries": 500,
-    "acquire_n_at_a_time": 60,
-    "n_initial": 60,
+    "acquire_n_at_a_time": 30,
+    "n_initial": 30,
 }
 
 ########################################################################################################################

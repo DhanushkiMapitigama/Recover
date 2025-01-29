@@ -389,7 +389,7 @@ class DrugCombMatrix:
         test_on_unseen_cell_line = config["test_on_unseen_cell_line"]
         split_valid_train_level = config["split_valid_train"]
 
-        assert split_valid_train_level in ["cell_line_level", "pair_level"]
+        #assert split_valid_train_level in ["cell_line_level", "pair_level"]
 
         valid_prob, test_prob = config["val_set_prop"], config["test_set_prop"]
 
@@ -493,8 +493,7 @@ class DrugCombMatrix:
             # Split everything at the pair level
             ##################################################################
 
-            assert config["split_valid_train"] == "pair_level", "if not testing on separate cell lines, " \
-                                                                "split level must be on the pair level"
+            #assert config["split_valid_train"] == "pair_level", "if not testing on separate cell lines, " "split level must be on the pair level"
 
             # Get unique edges (one for each drug pair, regardless of cell line)
             unique_ddi_edge_idx = self.data.ddi_edge_idx.unique(dim=1)

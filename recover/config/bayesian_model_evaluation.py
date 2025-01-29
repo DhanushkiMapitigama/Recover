@@ -1,4 +1,4 @@
-from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
+from recover.datasets.drugcomb_matrix_data import DrugCombMatrix, DrugCombMatrixDrugLevelSplitTrain, DrugCombMatrixOneHiddenDrugSplitTrain
 from recover.models.models import Baseline
 from recover.models.predictors import BilinearFilmMLPPredictor, BilinearMLPPredictor, MLPPredictor
 from recover.utils.utils import get_project_root
@@ -15,9 +15,9 @@ from importlib import import_module
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([1, 2, 3, 42]),
+    "seed": tune.grid_search([42]),
     # Optimizer config
-    "lr": 1e-4,
+    "lr": tune.grid_search([1e-3]),
     "weight_decay": 1e-2,
     "batch_size": 128,
     # Train epoch and eval_epoch to use
@@ -40,7 +40,7 @@ predictor_config = {
         ],
     "merge_n_layers_before_the_end": 2,  # Computation on the sum of the two drug embeddings for the last n layers
     "allow_neg_eigval": True,
-    "stop": {"training_iteration": 1000, 'patience': 10}
+    "stop": {"training_iteration": 200, 'patience': 5}
 }
 
 model_config = {
@@ -54,14 +54,14 @@ dataset_config = {
     "in_house_data": 'without',
     "rounds_to_include": [],
     "val_set_prop": 0.2,
-    "test_set_prop": 0.1,
+    "test_set_prop": 0.2,
     "test_on_unseen_cell_line": False,
     "split_valid_train": "pair_level",
     "cell_line": 'MCF7',  # 'PC-3',
     "target": "bliss_max",  # tune.grid_search(["css", "bliss", "zip", "loewe", "hsa"]),
     "fp_bits": 1024,
     "fp_radius": 2,
-    "add_noise": True,
+    "add_noise": False,
     "noise_type": 'salt_pepper', # 'gaussian', 'salt_pepper', 'random'
     "noise_prop": 0.1,
 }
@@ -80,11 +80,11 @@ configuration = {
     },
     "summaries_dir": os.path.join(get_project_root(), "RayLogs"),
     "memory": 1800,
-    "stop": {"training_iteration": 1000, 'patience': 10},
+    "stop": {"training_iteration": 200, 'patience': 5},
     "checkpoint_score_attr": 'eval/comb_r_squared',
     "keep_checkpoints_num": 1,
     "checkpoint_at_end": True,
-    "checkpoint_freq": 0,
+    "checkpoint_freq": 1,
     "resources_per_trial": {"cpu": 16, "gpu": 0},
     "scheduler": None,
     "search_alg": None,

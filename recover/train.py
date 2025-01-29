@@ -6,6 +6,7 @@ from recover.utils.utils import get_tensor_dataset, get_tensor_dataset_swapped_c
 from recover.utils.utils import add_gaussian_noise, add_random_noise, add_salt_and_pepper_noise
 from torch.utils.data import random_split
 from ray import tune
+from recover.YF import YFOptimizer
 import ray
 import time
 import argparse
@@ -14,7 +15,7 @@ import pandas as pd
 import importlib
 from scipy import stats
 from scipy.stats import spearmanr
-
+from recover.datasets.drugcomb_matrix_data import DrugCombMatrixDrugLevelSplitTest, DrugCombMatrixOneHiddenDrugSplitTest
 
 ########################################################################################################################
 # Epoch loops
@@ -119,6 +120,7 @@ def eval_epoch(data, loader, model):
     all_out = []
     all_mean_preds = []
     all_targets = []
+    all_combs = []
 
     with torch.no_grad():
         for _, drug_drug_batch in enumerate(loader):
@@ -128,6 +130,7 @@ def eval_epoch(data, loader, model):
             all_out.append(out)
             all_mean_preds.extend(out.mean(dim=1).tolist())
             all_targets.extend(drug_drug_batch[2].tolist())
+            all_combs.extend(drug_drug_batch[0].tolist())
 
             loss = model.loss(out, drug_drug_batch)
             epoch_loss += loss.item()
@@ -145,7 +148,7 @@ def eval_epoch(data, loader, model):
 
     all_out = torch.cat(all_out)
 
-    return summary_dict, all_out
+    return summary_dict, all_out, all_combs
 
 
 """
@@ -214,6 +217,8 @@ class BasicTrainer(tune.Trainable):
 
         self.batch_size = config["batch_size"]
         device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        #device_type = "cpu"
+                        
         self.device = torch.device(device_type)
         self.training_it = 0
 
@@ -226,6 +231,9 @@ class BasicTrainer(tune.Trainable):
             in_house_data=config["in_house_data"],
             rounds_to_include=config["rounds_to_include"],
         )
+        
+        self.patience_stop = config["stop"]["patience"]
+        self.max_iter = config["stop"]["training_iteration"]
 
         self.data = dataset.data.to(self.device)
 
@@ -259,6 +267,31 @@ class BasicTrainer(tune.Trainable):
             valid_ddi_dataset,
             batch_size=config["batch_size"]
         )
+        
+        
+        
+        # Test loader
+        test_ddi_dataset = get_tensor_dataset(self.data, self.test_idxs)
+
+        self.test_loader = DataLoader(
+            test_ddi_dataset,
+            batch_size=config["batch_size"]
+        )
+        
+    
+        # for unseen test - DrugCombMatrixDrugLevelSplitTest - ONLY WORKS ON CPU
+        # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest - ONLY WORKS ON CPU
+        
+        
+        dl_split_data = DrugCombMatrixOneHiddenDrugSplitTest(cell_line='MCF7',
+                                         fp_bits=1024,
+                                         fp_radius=2)
+        
+        dl_split_data.data.ddi_edge_response = dl_split_data.data.ddi_edge_bliss_max
+        self.test_idxs = range(len(dl_split_data.data.ddi_edge_response))
+        test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
+        self.test_loader = DataLoader(test_dataset, batch_size=128)
+        
 
         # Initialize model
         self.model = config["model"](self.data, config)
@@ -298,7 +331,7 @@ class BasicTrainer(tune.Trainable):
             self.optim,
         )
 
-        eval_metrics, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
+        eval_metrics, _, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
 
         train_metrics = [("train/" + k, v) for k, v in train_metrics.items()]
         eval_metrics = [("eval/" + k, v) for k, v in eval_metrics.items()]
@@ -316,7 +349,88 @@ class BasicTrainer(tune.Trainable):
 
         metrics['patience'] = self.patience
         metrics['all_space_explored'] = 0
+        num_realizations  = 1
 
+        
+        if ((self.patience >= self.patience_stop) | (self.training_it > self.max_iter)):
+        
+            print("Final eval performance")
+            final_eval_result = {}
+            
+            realization_results, result_synergy, drug_combs = self.eval_epoch(self.data, self.valid_loader, self.model)
+            final_eval_metrics = dict([("final_eval/" + k, [v]) for k, v in realization_results.items()])
+            
+            for i in range(num_realizations-1):
+                realization_results, new_synergy, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
+                result_synergy = torch.cat((result_synergy, new_synergy), dim=1)
+                for k, v in realization_results.items():
+                    final_eval_metrics["final_eval/" + k].append(v)
+                    
+            for key in final_eval_metrics:
+                final_eval_result[str(key)+ "/mean"] = np.mean(final_eval_metrics[key])
+                final_eval_result[str(key)+ "/std"] = np.std(final_eval_metrics[key])
+                
+            
+            #synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
+            #synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
+            
+            """
+            # Uncomment this to get the synergy prediction performance when working with multi-cell lines 
+            # Aggregate result for duplicate sets regardless of cell-line
+            result_tuples = list(map(lambda inner_list: tuple(sorted(inner_list)), drug_combs))
+            dataset = pd.DataFrame({'combination': result_tuples, 'mean': synergy_mean, 'std': synergy_std }, columns=['combination', 'mean', 'std'])
+            result_df = dataset.groupby('combination').apply(custom_agg) # Do custom aggregration  - Not needed when working on one cell-line but no difference in results
+            result_df.reset_index(drop=True, inplace=True)
+            """
+            
+            metrics.update(dict(final_eval_result))
+            
+            
+            print("Test performance")
+            test_result = {}
+            print(result_synergy)
+            
+        
+            
+            realization_results, result_synergy, drug_combs = self.eval_epoch(self.data, self.test_loader, self.model)
+            drug_combinations_synergy = {'data': self.test_idxs}
+            test_metrics = dict([("test/" + k, [v]) for k, v in realization_results.items()])
+            
+            for i in range(num_realizations-1):
+                realization_results, new_synergy, _ = self.eval_epoch(self.data, self.test_loader, self.model)
+                result_synergy = torch.cat((result_synergy, new_synergy), dim=1)
+                for k, v in realization_results.items():
+                    test_metrics["test/" + k].append(v)
+                    
+            for key in test_metrics:
+                test_result[str(key)+ "/mean"] = np.mean(test_metrics[key])
+                test_result[str(key)+ "/std"] = np.std(test_metrics[key])
+                
+            
+            synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
+            synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
+
+            
+            """
+            # Uncomment this to get the synergy prediction performance when working with multi-cell lines 
+            # Aggregate result for duplicate sets regardless of cell-line
+            result_tuples = list(map(lambda inner_list: tuple(sorted(inner_list)), drug_combs))
+            dataset = pd.DataFrame({'combination': result_tuples, 'mean': synergy_mean, 'std': synergy_std }, columns=['combination', 'mean', 'std'])
+            result_df = dataset.groupby('combination').apply(custom_agg) # Do custom aggregration  - Not needed when working on one cell-line but no difference in results
+            result_df.reset_index(drop=True, inplace=True)
+            """
+            
+            metrics.update(dict(test_result))
+            
+            metrics['synergy_combs'] = list(drug_combs)
+            metrics['synergy_mean'] = list(synergy_mean)
+            metrics['synergy_std'] = list(synergy_std)
+            
+            """
+            # Start the test on permuted unseen dataset - To confirm the invariance
+            # Change the test_invariance boolean in Trainer setup to enable/disable this part of the code
+            """
+            
         return metrics
 
     def save_checkpoint(self, checkpoint_dir):
@@ -337,7 +451,7 @@ class BayesianBasicTrainer(tune.Trainable):
     def setup(self, config):
         print("Initializing regular training pipeline")
         
-        self.test_invariance = True 
+        self.test_invariance = False 
 
         self.batch_size = config["batch_size"]
         self.num_realizations = config["num_realizations"]
@@ -381,6 +495,7 @@ class BayesianBasicTrainer(tune.Trainable):
 
         torch.manual_seed(config["seed"])
         np.random.seed(config["seed"])
+                
 
         # Perform train/valid/test split. Test split is fixed regardless of the user defined seed
         self.train_idxs, self.val_idxs, self.test_idxs = dataset.random_split(config)
@@ -410,6 +525,8 @@ class BayesianBasicTrainer(tune.Trainable):
             batch_size=config["batch_size"]
         )
         
+        
+        
         # Test loader
         test_ddi_dataset = get_tensor_dataset(self.data, self.test_idxs)
 
@@ -417,8 +534,23 @@ class BayesianBasicTrainer(tune.Trainable):
             test_ddi_dataset,
             batch_size=config["batch_size"]
         )
-
-
+        
+        """
+        # for unseen test - DrugCombMatrixDrugLevelSplitTest - ONLY WORKS ON CPU
+        # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest - ONLY WORKS ON CPU
+        
+        
+        dl_split_data = DrugCombMatrixOneHiddenDrugSplitTest(cell_line='MCF7',
+                                         fp_bits=1024,
+                                         fp_radius=2)
+        
+        dl_split_data.data.ddi_edge_response = dl_split_data.data.ddi_edge_bliss_max
+        self.test_idxs = range(len(dl_split_data.data.ddi_edge_response))
+        test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
+        self.test_loader = DataLoader(test_dataset, batch_size=128)
+        
+        """
+        
         # Initialize model
         self.model = config["model"](self.data, config)
 
@@ -441,6 +573,11 @@ class BayesianBasicTrainer(tune.Trainable):
             lr=config["lr"],
             weight_decay=config["weight_decay"],
         )
+
+        # self.optim = YFOptimizer(
+        #     self.model.parameters(),
+        #     lr=config["lr"]
+        # )
 
         self.train_epoch = config["train_epoch"]
         self.eval_epoch = config["eval_epoch"]
@@ -485,8 +622,44 @@ class BayesianBasicTrainer(tune.Trainable):
         P.S. The combinations are unseen, this is not related to the drugs
         """
         if ((self.patience >= self.patience_stop) | (self.training_it > self.max_iter)):
+        
+            print("Final eval performance")
+            final_eval_result = {}
+            
+            realization_results, result_synergy, drug_combs = self.eval_epoch(self.data, self.valid_loader, self.model)
+            final_eval_metrics = dict([("final_eval/" + k, [v]) for k, v in realization_results.items()])
+            
+            for i in range(num_realizations-1):
+                realization_results, new_synergy, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
+                result_synergy = torch.cat((result_synergy, new_synergy), dim=1)
+                for k, v in realization_results.items():
+                    final_eval_metrics["final_eval/" + k].append(v)
+                    
+            for key in final_eval_metrics:
+                final_eval_result[str(key)+ "/mean"] = np.mean(final_eval_metrics[key])
+                final_eval_result[str(key)+ "/std"] = np.std(final_eval_metrics[key])
+                
+            
+            #synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
+            #synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
+            
+            """
+            # Uncomment this to get the synergy prediction performance when working with multi-cell lines 
+            # Aggregate result for duplicate sets regardless of cell-line
+            result_tuples = list(map(lambda inner_list: tuple(sorted(inner_list)), drug_combs))
+            dataset = pd.DataFrame({'combination': result_tuples, 'mean': synergy_mean, 'std': synergy_std }, columns=['combination', 'mean', 'std'])
+            result_df = dataset.groupby('combination').apply(custom_agg) # Do custom aggregration  - Not needed when working on one cell-line but no difference in results
+            result_df.reset_index(drop=True, inplace=True)
+            """
+            
+            metrics.update(dict(final_eval_result))
+            
+            
             print("Test performance")
             test_result = {}
+            print(result_synergy)
+            
+        
             
             realization_results, result_synergy, drug_combs = self.eval_epoch(self.data, self.test_loader, self.model)
             drug_combinations_synergy = {'data': self.test_idxs}
@@ -503,8 +676,9 @@ class BayesianBasicTrainer(tune.Trainable):
                 test_result[str(key)+ "/std"] = np.std(test_metrics[key])
                 
             
-            synergy_mean = list(torch.mean(result_synergy, dim=1).numpy())
-            synergy_std = list(torch.std(result_synergy, dim=1).numpy())
+            synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
+            synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
+
             
             """
             # Uncomment this to get the synergy prediction performance when working with multi-cell lines 
@@ -553,8 +727,8 @@ class BayesianBasicTrainer(tune.Trainable):
                     swapped_test_result[str(key)+ "/std"] = np.std(swapped_test_metrics[key])
                     
                 
-                synergy_mean = list(torch.mean(result_synergy, dim=1).numpy())
-                synergy_std = list(torch.std(result_synergy, dim=1).numpy())
+                synergy_mean = list(torch.mean(result_synergy, dim=1).cpu().numpy())
+                synergy_std = list(torch.std(result_synergy, dim=1).cpu().numpy())
                 
                 metrics.update(dict(swapped_test_result))
                 
@@ -595,9 +769,11 @@ class ActiveTrainer(BasicTrainer):
         self.n_epoch_between_queries = config["n_epoch_between_queries"]
 
         # randomly acquire data at the beginning
-        self.seen_idxs = self.train_idxs[:config["n_initial"]]
-        self.unseen_idxs = self.train_idxs[config["n_initial"]:]
+        self.seen_idxs = self.train_idxs[:config["n_initial"]].to(self.device)
+        self.unseen_idxs = self.train_idxs[config["n_initial"]:].to(self.device)
         self.immediate_regrets = torch.empty(0)
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = torch.device(device_type)
 
         # Initialize variable that saves the last query
         self.last_query_idxs = self.seen_idxs
@@ -609,7 +785,7 @@ class ActiveTrainer(BasicTrainer):
         one_perc = int(0.01 * len(self.unseen_idxs))
         scores = self.data.ddi_edge_response[self.unseen_idxs]
         self.best_score = scores.max()
-        self.top_one_perc = set(self.unseen_idxs[torch.argsort(scores, descending=True)[:one_perc]].numpy())
+        self.top_one_perc = set(self.unseen_idxs[torch.argsort(scores, descending=True)[:one_perc]].cpu().numpy())
         self.count = 0
 
     def step(self):
@@ -658,7 +834,7 @@ class ActiveTrainer(BasicTrainer):
         metrics["seen_idxs_in_dataset"] = self.seen_idxs.detach().cpu().tolist()
 
         # Compute proportion of top 1% synergistic drugs which have been discovered
-        query_set = set(query.detach().numpy())
+        query_set = set(query.detach().cpu().numpy())
         self.count += len(query_set & self.top_one_perc)
         metrics["top"] = self.count / len(self.top_one_perc)
 
@@ -798,10 +974,13 @@ class ActiveTrainerBayesian(BasicTrainer):
         self.acquisition = config["acquisition"](config)
         self.n_epoch_between_queries = config["n_epoch_between_queries"]
         self.num_realizations = config["num_realizations"]
+        
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = torch.device(device_type)
 
         # randomly acquire data at the beginning
-        self.seen_idxs = self.train_idxs[:config["n_initial"]]
-        self.unseen_idxs = self.train_idxs[config["n_initial"]:]
+        self.seen_idxs = self.train_idxs[:config["n_initial"]].to(self.device)
+        self.unseen_idxs = self.train_idxs[config["n_initial"]:].to(self.device)
         self.immediate_regrets = torch.empty(0)
 
         # Initialize variable that saves the last query
@@ -814,7 +993,9 @@ class ActiveTrainerBayesian(BasicTrainer):
         one_perc = int(0.01 * len(self.unseen_idxs))
         scores = self.data.ddi_edge_response[self.unseen_idxs]
         self.best_score = scores.max()
-        self.top_one_perc = set(self.unseen_idxs[torch.argsort(scores, descending=True)[:one_perc]].numpy())
+        #change below
+        #self.top_one_perc = set(self.unseen_idxs[torch.argsort(scores, descending=True)[:one_perc]].numpy())
+        self.top_one_perc = set(self.unseen_idxs[torch.argsort(scores, descending=True)[:one_perc]].cpu().numpy())
         self.count = 0
 
     def step(self):
@@ -878,7 +1059,8 @@ class ActiveTrainerBayesian(BasicTrainer):
         metrics["seen_idxs_in_dataset"] = self.seen_idxs.detach().cpu().tolist()
 
         # Compute proportion of top 1% synergistic drugs which have been discovered
-        query_set = set(query.detach().numpy())
+        #query_set = set(query.detach().numpy())
+        query_set = set(query.detach().cpu().numpy())
         self.count += len(query_set & self.top_one_perc)
         metrics["top"] = self.count / len(self.top_one_perc)
 
@@ -953,6 +1135,11 @@ class ActiveTrainerBayesian(BasicTrainer):
         # Reinitialize optimizer
         self.optim = torch.optim.Adam(self.model.parameters(), lr=self.config["lr"],
                                       weight_decay=self.config["weight_decay"])
+        
+        # self.optim = YFOptimizer(
+        #     self.model.parameters(),
+        #     lr=self.config["lr"]
+        # )
 
         best_eval_r2 = float("-inf")
         patience_max = self.config["patience_max"]
